@@ -19,9 +19,21 @@ const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
 const CUSTOMER_DIR = path.join(UPLOADS_DIR, 'customer');
 const BASE_DIR = path.join(UPLOADS_DIR, 'base');
 
+// Category directories for outfit images
+const CATEGORY_DIRS = {
+  'men-outfits': path.join(UPLOADS_DIR, 'men-outfits'),
+  'women-outfits': path.join(UPLOADS_DIR, 'women-outfits'),
+  'two-people': path.join(UPLOADS_DIR, 'two-people'),
+  'three-people': path.join(UPLOADS_DIR, 'three-people')
+};
+
+// All valid categories
+const VALID_CATEGORIES = ['generated', 'customer', 'base', 'men-outfits', 'women-outfits', 'two-people', 'three-people'];
+
 // Ensure upload directories exist
 const ensureDirectories = () => {
-  [UPLOADS_DIR, GENERATED_DIR, CUSTOMER_DIR, BASE_DIR].forEach(dir => {
+  const allDirs = [UPLOADS_DIR, GENERATED_DIR, CUSTOMER_DIR, BASE_DIR, ...Object.values(CATEGORY_DIRS)];
+  allDirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
       console.log(`Created directory: ${dir}`);
@@ -159,7 +171,7 @@ const saveImageFromBase64 = (base64Data, category = 'customer', customFilename =
 
     const buffer = Buffer.from(imageData, 'base64');
     const filename = customFilename || generateUniqueFilename('upload', ext);
-    const targetDir = category === 'customer' ? CUSTOMER_DIR : category === 'base' ? BASE_DIR : GENERATED_DIR;
+    const targetDir = getCategoryDir(category);
     const filePath = path.join(targetDir, filename);
 
     fs.writeFileSync(filePath, buffer);
@@ -464,6 +476,7 @@ app.post('/api/download-with-dpi', async (req, res) => {
 const getCategoryDir = (category) => {
   if (category === 'customer') return CUSTOMER_DIR;
   if (category === 'base') return BASE_DIR;
+  if (CATEGORY_DIRS[category]) return CATEGORY_DIRS[category];
   return GENERATED_DIR;
 };
 
@@ -471,7 +484,7 @@ const getCategoryDir = (category) => {
 app.get('/api/images', (req, res) => {
   try {
     const { category } = req.query;
-    const categories = category ? [category] : ['generated', 'customer', 'base'];
+    const categories = category ? [category] : VALID_CATEGORIES;
     const images = [];
 
     categories.forEach(cat => {
@@ -593,6 +606,21 @@ app.get('/api/storage/stats', (req, res) => {
     const customerStats = getDirectoryStats(CUSTOMER_DIR);
     const baseStats = getDirectoryStats(BASE_DIR);
 
+    // Get stats for outfit categories
+    const categoryStats = {};
+    let totalCategoryCount = 0;
+    let totalCategorySize = 0;
+    Object.entries(CATEGORY_DIRS).forEach(([cat, dir]) => {
+      const stats = getDirectoryStats(dir);
+      categoryStats[cat] = {
+        directory: dir,
+        ...stats,
+        totalSizeMB: (stats.totalSize / (1024 * 1024)).toFixed(2)
+      };
+      totalCategoryCount += stats.count;
+      totalCategorySize += stats.totalSize;
+    });
+
     res.json({
       success: true,
       storage: {
@@ -612,10 +640,11 @@ app.get('/api/storage/stats', (req, res) => {
           ...baseStats,
           totalSizeMB: (baseStats.totalSize / (1024 * 1024)).toFixed(2)
         },
+        ...categoryStats,
         total: {
-          count: generatedStats.count + customerStats.count + baseStats.count,
-          totalSize: generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize,
-          totalSizeMB: ((generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize) / (1024 * 1024)).toFixed(2)
+          count: generatedStats.count + customerStats.count + baseStats.count + totalCategoryCount,
+          totalSize: generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize + totalCategorySize,
+          totalSizeMB: ((generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize + totalCategorySize) / (1024 * 1024)).toFixed(2)
         }
       }
     });
