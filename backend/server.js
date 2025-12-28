@@ -17,10 +17,11 @@ const PORT = process.env.PORT || 3000;
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
 const CUSTOMER_DIR = path.join(UPLOADS_DIR, 'customer');
+const BASE_DIR = path.join(UPLOADS_DIR, 'base');
 
 // Ensure upload directories exist
 const ensureDirectories = () => {
-  [UPLOADS_DIR, GENERATED_DIR, CUSTOMER_DIR].forEach(dir => {
+  [UPLOADS_DIR, GENERATED_DIR, CUSTOMER_DIR, BASE_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
       console.log(`Created directory: ${dir}`);
@@ -122,7 +123,7 @@ const saveImageFromUrl = async (imageUrl, category = 'generated', customFilename
     else if (imageUrl.includes('.png')) ext = 'png';
 
     const filename = customFilename || generateUniqueFilename('artwork', ext);
-    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const targetDir = category === 'customer' ? CUSTOMER_DIR : category === 'base' ? BASE_DIR : GENERATED_DIR;
     const filePath = path.join(targetDir, filename);
 
     fs.writeFileSync(filePath, Buffer.from(response.data));
@@ -158,7 +159,7 @@ const saveImageFromBase64 = (base64Data, category = 'customer', customFilename =
 
     const buffer = Buffer.from(imageData, 'base64');
     const filename = customFilename || generateUniqueFilename('upload', ext);
-    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const targetDir = category === 'customer' ? CUSTOMER_DIR : category === 'base' ? BASE_DIR : GENERATED_DIR;
     const filePath = path.join(targetDir, filename);
 
     fs.writeFileSync(filePath, buffer);
@@ -459,15 +460,22 @@ app.post('/api/download-with-dpi', async (req, res) => {
 // Persistent Storage API Endpoints
 // ========================================
 
+// Helper to get directory for a category
+const getCategoryDir = (category) => {
+  if (category === 'customer') return CUSTOMER_DIR;
+  if (category === 'base') return BASE_DIR;
+  return GENERATED_DIR;
+};
+
 // List all images in persistent storage
 app.get('/api/images', (req, res) => {
   try {
     const { category } = req.query;
-    const categories = category ? [category] : ['generated', 'customer'];
+    const categories = category ? [category] : ['generated', 'customer', 'base'];
     const images = [];
 
     categories.forEach(cat => {
-      const dir = cat === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+      const dir = getCategoryDir(cat);
       if (fs.existsSync(dir)) {
         const files = fs.readdirSync(dir);
         files.forEach(filename => {
@@ -531,7 +539,7 @@ app.post('/api/images/upload', (req, res) => {
 app.delete('/api/images/:category/:filename', (req, res) => {
   try {
     const { category, filename } = req.params;
-    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const targetDir = getCategoryDir(category);
     const filePath = path.join(targetDir, filename);
 
     // Security check - prevent directory traversal
@@ -583,6 +591,7 @@ app.get('/api/storage/stats', (req, res) => {
 
     const generatedStats = getDirectoryStats(GENERATED_DIR);
     const customerStats = getDirectoryStats(CUSTOMER_DIR);
+    const baseStats = getDirectoryStats(BASE_DIR);
 
     res.json({
       success: true,
@@ -598,10 +607,15 @@ app.get('/api/storage/stats', (req, res) => {
           ...customerStats,
           totalSizeMB: (customerStats.totalSize / (1024 * 1024)).toFixed(2)
         },
+        base: {
+          directory: BASE_DIR,
+          ...baseStats,
+          totalSizeMB: (baseStats.totalSize / (1024 * 1024)).toFixed(2)
+        },
         total: {
-          count: generatedStats.count + customerStats.count,
-          totalSize: generatedStats.totalSize + customerStats.totalSize,
-          totalSizeMB: ((generatedStats.totalSize + customerStats.totalSize) / (1024 * 1024)).toFixed(2)
+          count: generatedStats.count + customerStats.count + baseStats.count,
+          totalSize: generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize,
+          totalSizeMB: ((generatedStats.totalSize + customerStats.totalSize + baseStats.totalSize) / (1024 * 1024)).toFixed(2)
         }
       }
     });
@@ -642,4 +656,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Persistent storage: ${UPLOADS_DIR}`);
   console.log(`  - Generated images: ${GENERATED_DIR}`);
   console.log(`  - Customer uploads: ${CUSTOMER_DIR}`);
+  console.log(`  - Base images: ${BASE_DIR}`);
 });
