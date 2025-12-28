@@ -1,5 +1,5 @@
 // Renaissance-style base images organized by category
-// Replace placeholder URLs with actual image paths or URLs
+// Images are now loaded dynamically from the server via API
 
 export const RENAISSANCE_CATEGORIES = [
   {
@@ -28,26 +28,12 @@ export const RENAISSANCE_CATEGORIES = [
   }
 ];
 
-// Base path for images - update this to match your image hosting
-const BASE_PATH = '/images/renaissance';
-
-// Generate image entries for each category
-const generateImages = (category, count) => {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${category}-${i + 1}`,
-    category,
-    name: `${category.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())} ${i + 1}`,
-    // Update these URLs to point to your actual images
-    url: `${BASE_PATH}/${category}/${i + 1}.jpg`,
-    thumbnail: `${BASE_PATH}/${category}/thumbnails/${i + 1}.jpg`
-  }));
-};
-
+// No mock images - all images are loaded from the server
 export const RENAISSANCE_IMAGES = {
-  'men-outfits': generateImages('men-outfits', 20),
-  'women-outfits': generateImages('women-outfits', 20),
-  'two-people': generateImages('two-people', 20),
-  'three-people': generateImages('three-people', 20)
+  'men-outfits': [],
+  'women-outfits': [],
+  'two-people': [],
+  'three-people': []
 };
 
 // Helper to get all images as flat array

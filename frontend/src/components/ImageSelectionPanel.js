@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Image, Check, X, Maximize2, Upload, Trash2, RefreshCw, Plus } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import toast from 'react-hot-toast';
-import { RENAISSANCE_CATEGORIES, getImagesByCategory } from '../data/renaissanceImages';
+import { RENAISSANCE_CATEGORIES } from '../data/renaissanceImages';
 
 const ALL_CATEGORIES = RENAISSANCE_CATEGORIES;
 
@@ -133,12 +133,9 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
     noKeyboard: false
   });
 
-  // Combine static images with uploaded images for the current category
-  const staticImages = getImagesByCategory(activeCategory);
-  const uploadedForCategory = uploadedImagesByCategory[activeCategory] || [];
-  const currentImages = [...uploadedForCategory, ...staticImages];
+  // Get uploaded images for the current category (all images are now server-uploaded)
+  const currentImages = uploadedImagesByCategory[activeCategory] || [];
   const currentCategory = ALL_CATEGORIES.find(c => c.id === activeCategory);
-  const uploadedCount = uploadedForCategory.length;
 
   const handleImageError = (imageId) => {
     setImageErrors(prev => ({ ...prev, [imageId]: true }));
@@ -361,9 +358,6 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
       {currentImages.length > 0 && (
         <div className="text-center text-sm text-slate-500">
           Showing {currentImages.length} images in {currentCategory?.name}
-          {uploadedCount > 0 && (
-            <span className="text-amber-600"> ({uploadedCount} uploaded)</span>
-          )}
         </div>
       )}
 
