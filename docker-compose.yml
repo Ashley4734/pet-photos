@@ -1,0 +1,49 @@
+# ===========================
+# AI Art Generator - Coolify Deployment
+# ===========================
+#
+# This docker-compose.yml is optimized for Coolify deployment.
+#
+# Coolify Configuration:
+# 1. Import this repository in Coolify
+# 2. Coolify will automatically detect docker-compose.yml
+# 3. Add your environment variables in Coolify's UI:
+#    - REPLICATE_API_TOKEN (required)
+#    - OPENAI_API_KEY (optional)
+# 4. The uploads volume will persist across deployments
+#
+# ===========================
+
+version: '3.8'
+
+services:
+  pet-photos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - UPLOADS_DIR=/app/uploads
+      # Set these in Coolify's environment variables UI:
+      # - REPLICATE_API_TOKEN=your_token_here
+      # - OPENAI_API_KEY=your_key_here (optional)
+    volumes:
+      # Persistent storage for generated and uploaded images
+      # This volume persists across container restarts and redeployments
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Named volume for persistent storage
+# Coolify will manage this volume automatically
+volumes:
+  uploads_data:
+    driver: local

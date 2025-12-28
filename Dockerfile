@@ -56,10 +56,17 @@ COPY backend/server.js ./
 # Copy frontend build from builder stage
 COPY --from=frontend-builder /app/frontend/build /app/build
 
+# Create uploads directory for persistent storage
+# This directory can be mounted as a volume in Coolify
+RUN mkdir -p /app/uploads/generated /app/uploads/customer
+
 # Create user and group
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S artgen -u 1001 -G nodejs && \
-    chown -R artgen:nodejs /app
+    chown -R artgen:nodejs /app /app/uploads
+
+# Define volume for persistent storage (mountable in Coolify)
+VOLUME ["/app/uploads"]
 
 # Copy and set up entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
