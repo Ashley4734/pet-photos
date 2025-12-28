@@ -30,8 +30,8 @@ export default function GenerateTab() {
 
   // Renaissance base image selection
   const [selectedBaseImage, setSelectedBaseImage] = useState(null);
-  const [customerPhoto, setCustomerPhoto] = useState(null);
-  const [customerPhotoPreview, setCustomerPhotoPreview] = useState(null);
+  const [customerPhotos, setCustomerPhotos] = useState([]);
+  const [customerPhotoPreviews, setCustomerPhotoPreviews] = useState([]);
 
   // Convert file to base64 data URI
   const fileToBase64 = useCallback((file) => {
@@ -76,30 +76,34 @@ export default function GenerateTab() {
     onDrop: onOpenaiImageDrop
   });
 
-  // Handle customer photo drop
+  // Handle customer photos drop (multiple)
   const onCustomerPhotoDrop = useCallback((acceptedFiles) => {
-    const file = acceptedFiles[0];
-    if (file) {
-      setCustomerPhoto(file);
-      setCustomerPhotoPreview(URL.createObjectURL(file));
-      toast.success('Customer photo added!');
+    if (acceptedFiles.length > 0) {
+      setCustomerPhotos(prev => [...prev, ...acceptedFiles]);
+      const newPreviews = acceptedFiles.map(file => URL.createObjectURL(file));
+      setCustomerPhotoPreviews(prev => [...prev, ...newPreviews]);
+      toast.success(`Added ${acceptedFiles.length} customer photo${acceptedFiles.length > 1 ? 's' : ''}!`);
     }
   }, []);
 
-  // Clear customer photo
-  const clearCustomerPhoto = useCallback(() => {
-    if (customerPhotoPreview) {
-      URL.revokeObjectURL(customerPhotoPreview);
-    }
-    setCustomerPhoto(null);
-    setCustomerPhotoPreview(null);
-  }, [customerPhotoPreview]);
+  // Clear all customer photos
+  const clearCustomerPhotos = useCallback(() => {
+    customerPhotoPreviews.forEach(url => URL.revokeObjectURL(url));
+    setCustomerPhotos([]);
+    setCustomerPhotoPreviews([]);
+  }, [customerPhotoPreviews]);
 
-  // Dropzone for customer photo
+  // Remove single customer photo
+  const removeCustomerPhoto = useCallback((index) => {
+    URL.revokeObjectURL(customerPhotoPreviews[index]);
+    setCustomerPhotos(prev => prev.filter((_, i) => i !== index));
+    setCustomerPhotoPreviews(prev => prev.filter((_, i) => i !== index));
+  }, [customerPhotoPreviews]);
+
+  // Dropzone for customer photos (multiple)
   const customerPhotoDropzone = useDropzone({
     accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp'] },
-    multiple: false,
-    maxFiles: 1,
+    multiple: true,
     onDrop: onCustomerPhotoDrop
   });
 
@@ -174,7 +178,7 @@ export default function GenerateTab() {
           if (openaiUserId.trim()) {
             requestBody.user_id = openaiUserId.trim();
           }
-          // Collect all input images (base image, customer photo, and any additional reference images)
+          // Collect all input images (base image, customer photos, and any additional reference images)
           const inputImagePromises = [];
 
           // Add selected base image first (if any)
@@ -182,9 +186,11 @@ export default function GenerateTab() {
             inputImagePromises.push(urlToBase64(selectedBaseImage.url));
           }
 
-          // Add customer photo
-          if (customerPhoto) {
-            inputImagePromises.push(fileToBase64(customerPhoto));
+          // Add customer photos
+          if (customerPhotos.length > 0) {
+            customerPhotos.forEach(file => {
+              inputImagePromises.push(fileToBase64(file));
+            });
           }
 
           // Add any additional reference images
@@ -223,7 +229,7 @@ export default function GenerateTab() {
               model: 'openai-image-1.5',
               parameters: requestBody,
               baseImage: selectedBaseImage,
-              hasCustomerPhoto: !!customerPhoto
+              customerPhotoCount: customerPhotos.length
             };
             newResults.push(result);
             console.log(`✅ Successfully generated image for: "${prompt}"`);
@@ -480,35 +486,54 @@ export default function GenerateTab() {
         >
           <h4 className="font-medium text-blue-800 mb-4 flex items-center gap-2">
             <User className="w-5 h-5" />
-            Step 2: Upload Customer Photo
+            Step 2: Upload Customer Photos
+            {customerPhotos.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-700">
+                {customerPhotos.length} photo{customerPhotos.length !== 1 ? 's' : ''}
+              </span>
+            )}
           </h4>
 
-          {customerPhotoPreview ? (
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <img
-                  src={customerPhotoPreview}
-                  alt="Customer photo"
-                  className="w-32 h-32 rounded-lg object-cover border-2 border-blue-300 shadow-md"
-                />
-                <button
-                  onClick={clearCustomerPhoto}
-                  className="absolute -top-2 -right-2 p-1 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md transition-colors"
-                  title="Remove photo"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+          {customerPhotoPreviews.length > 0 ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-3">
+                {customerPhotoPreviews.map((preview, idx) => (
+                  <div key={idx} className="relative group">
+                    <img
+                      src={preview}
+                      alt={`Customer photo ${idx + 1}`}
+                      className="w-24 h-24 rounded-lg object-cover border-2 border-blue-300 shadow-md"
+                    />
+                    <button
+                      onClick={() => removeCustomerPhoto(idx)}
+                      className="absolute -top-2 -right-2 p-1 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md transition-colors opacity-0 group-hover:opacity-100"
+                      title="Remove photo"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                    <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 rounded text-xs text-white">
+                      {idx + 1}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <p className="font-medium text-slate-700">Customer Photo</p>
-                <p className="text-sm text-slate-500">{customerPhoto?.name}</p>
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => customerPhotoDropzone.open()}
-                  className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+                  className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
                 >
-                  Change photo
+                  <Upload className="w-4 h-4" />
+                  Add more photos
+                </button>
+                <button
+                  onClick={clearCustomerPhotos}
+                  className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
+                >
+                  <X className="w-4 h-4" />
+                  Clear all
                 </button>
               </div>
+              <input {...customerPhotoDropzone.getInputProps()} />
             </div>
           ) : (
             <div
@@ -523,16 +548,16 @@ export default function GenerateTab() {
               <User className="w-10 h-10 text-blue-400 mx-auto mb-3" />
               <p className="text-sm text-blue-700 font-medium">
                 {customerPhotoDropzone.isDragActive
-                  ? 'Drop photo here...'
-                  : 'Drag & drop customer photo or click to upload'}
+                  ? 'Drop photos here...'
+                  : 'Drag & drop customer photos or click to upload'}
               </p>
-              <p className="text-xs text-blue-500 mt-1">The person's face will be merged with the renaissance style</p>
+              <p className="text-xs text-blue-500 mt-1">Upload multiple photos at once - faces will be merged with the renaissance style</p>
             </div>
           )}
         </motion.div>
 
         {/* Generation Summary */}
-        {(selectedBaseImage || customerPhoto) && (
+        {(selectedBaseImage || customerPhotos.length > 0) && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -549,10 +574,10 @@ export default function GenerateTab() {
                   <span>{selectedBaseImage.name}</span>
                 </div>
               )}
-              {customerPhoto && (
+              {customerPhotos.length > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">Customer Photo:</span>
-                  <span>{customerPhoto.name}</span>
+                  <span className="font-medium">Customer Photos:</span>
+                  <span>{customerPhotos.length} photo{customerPhotos.length !== 1 ? 's' : ''}</span>
                 </div>
               )}
             </div>
@@ -781,16 +806,16 @@ export default function GenerateTab() {
           <textarea
             value={prompts}
             onChange={(e) => setPrompts(e.target.value)}
-            placeholder={selectedBaseImage || customerPhoto
+            placeholder={selectedBaseImage || customerPhotos.length > 0
               ? "Create a renaissance portrait combining the person's face with the elegant style and clothing from the reference image, maintaining the artistic quality and period-accurate details"
               : "beautiful renaissance portrait painting\nelegant royal court portrait in oil painting style\nclassic renaissance family portrait with ornate clothing"}
             rows={4}
             className="w-full px-4 py-4 bg-white/70 border border-white/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent-500 resize-none font-mono text-sm"
           />
           <p className="text-xs text-slate-500 mt-2">
-            {selectedBaseImage || customerPhoto
-              ? "Describe how to combine the customer's photo with the selected renaissance style. The AI will blend the person into the artistic style."
-              : "Each line will generate one image. Select a base image and upload a customer photo for best results."}
+            {selectedBaseImage || customerPhotos.length > 0
+              ? "Describe how to combine the customer's photos with the selected renaissance style. The AI will blend the people into the artistic style."
+              : "Each line will generate one image. Select a base image and upload customer photos for best results."}
           </p>
         </div>
 
@@ -938,12 +963,12 @@ export default function GenerateTab() {
                           Base: {result.baseImage.name}
                         </span>
                       )}
-                      {result.hasCustomerPhoto && (
+                      {result.customerPhotoCount > 0 && (
                         <span className="text-blue-600 text-xs">
-                          + Customer Photo
+                          + {result.customerPhotoCount} Customer Photo{result.customerPhotoCount !== 1 ? 's' : ''}
                         </span>
                       )}
-                      {result.parameters?.input_images && result.parameters.input_images.length > 0 && !result.baseImage && !result.hasCustomerPhoto && (
+                      {result.parameters?.input_images && result.parameters.input_images.length > 0 && !result.baseImage && !result.customerPhotoCount && (
                         <span className="text-slate-400">
                           Reference images: {result.parameters.input_images.length}
                         </span>
