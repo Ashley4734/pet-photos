@@ -82,47 +82,20 @@ app.post('/api/generate', async (req, res) => {
   console.log('AI Generation request received');
 
   try {
-    // Extract ALL parameters from request body
+    // Extract OpenAI Image 1.5 parameters from request body
     const {
       prompt,
-      model = 'seedream',
       aspect_ratio = '1:1',
-      // SeedreamS-3 parameters
-      size,
-      guidance_scale,
-      // Flux Schnell parameters
-      num_inference_steps,
-      go_fast,
-      megapixels,
-      output_format,
-      output_quality,
-      disable_safety_checker,
-      // Flux 1.1 Pro parameters
-      safety_tolerance,
-      prompt_upsampling,
-      width,
-      height,
-      image_prompt,
-      // Stable Diffusion parameters
-      num_outputs,
-      disable_nsfw_checker,
-      remove_background,
-      threshold,
-      stray_removal,
-      trim_background,
-      padding,
-      // OpenAI Image 1.5 parameters
       quality,
       background,
       moderation,
+      output_format,
       input_fidelity,
       number_of_images,
       output_compression,
       input_images,
       user_id,
-      openai_api_key,
-      // Common parameters
-      seed
+      openai_api_key
     } = req.body;
 
     // Validate prompt
@@ -131,9 +104,8 @@ app.post('/api/generate', async (req, res) => {
       return res.status(400).json({ error: 'Prompt required' });
     }
 
-    const modelName = model === 'flux-schnell' ? 'Flux Schnell' : model === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : model === 'stable-diffusion' ? 'Stable Diffusion' : model === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3';
     console.log(`Processing prompt: "${prompt.trim()}"`);
-    console.log(`Selected model: ${modelName}`);
+    console.log(`Using model: OpenAI Image 1.5`);
 
     // Check for API token
     const token = process.env.REPLICATE_API_TOKEN;
@@ -151,154 +123,53 @@ app.post('/api/generate', async (req, res) => {
     const replicate = new Replicate({ auth: token });
 
     // Try the generation with detailed logging
-    console.log(`Starting image generation with ${modelName}...`);
+    console.log(`Starting image generation with OpenAI Image 1.5...`);
 
     try {
-      // Prepare input parameters based on selected model
-      let inputParams;
-      let replicateModel;
+      // GPT Image 1.5 via Replicate API (supports reference images)
+      const replicateModel = "openai/gpt-image-1.5";
 
-      if (model === 'flux-schnell') {
-        // Flux Schnell parameters
-        replicateModel = "black-forest-labs/flux-schnell";
-        inputParams = {
-          prompt: prompt.trim(),
-          aspect_ratio: aspect_ratio,
-          num_inference_steps: num_inference_steps || 4,
-          go_fast: go_fast !== undefined ? go_fast : true,
-          megapixels: megapixels || '1',
-          output_format: output_format || 'webp',
-          output_quality: output_quality || 80,
-          disable_safety_checker: disable_safety_checker || false
-        };
+      // OpenAI API key is optional - Replicate uses proxy if not provided
+      const apiKey = openai_api_key || process.env.OPENAI_API_KEY;
 
-        // Add seed if provided
-        if (seed !== undefined && seed !== null) {
-          inputParams.seed = seed;
-        }
-      } else if (model === 'flux-1.1-pro') {
-        // Flux 1.1 Pro parameters
-        replicateModel = "black-forest-labs/flux-1.1-pro";
-        inputParams = {
-          prompt: prompt.trim(),
-          aspect_ratio: aspect_ratio,
-          output_format: output_format || 'webp',
-          output_quality: output_quality || 80,
-          safety_tolerance: safety_tolerance || 2,
-          prompt_upsampling: prompt_upsampling || false
-        };
+      // Map aspect_ratio to supported values (1:1, 3:2, 2:3)
+      let mappedAspectRatio = aspect_ratio;
 
-        // Add custom width/height when using custom aspect ratio
-        if (aspect_ratio === 'custom') {
-          if (width !== undefined && width !== null) {
-            // Round to nearest multiple of 32
-            inputParams.width = Math.round(width / 32) * 32;
-          }
-          if (height !== undefined && height !== null) {
-            // Round to nearest multiple of 32
-            inputParams.height = Math.round(height / 32) * 32;
-          }
-        }
+      // Validate aspect ratio - only 1:1, 3:2, 2:3 are supported
+      if (!['1:1', '3:2', '2:3'].includes(aspect_ratio)) {
+        mappedAspectRatio = '1:1'; // Default fallback
+      }
 
-        // Add image prompt URL for Flux Redux if provided
-        if (image_prompt && image_prompt.trim()) {
-          inputParams.image_prompt = image_prompt.trim();
-        }
+      const inputParams = {
+        prompt: prompt.trim(),
+        aspect_ratio: mappedAspectRatio,
+        quality: quality || 'auto',
+        number_of_images: Math.min(number_of_images || 1, 10),
+        output_format: output_format || 'webp',
+        output_compression: output_compression || 90,
+        background: background || 'auto',
+        moderation: moderation || 'auto'
+      };
 
-        // Add seed if provided
-        if (seed !== undefined && seed !== null) {
-          inputParams.seed = seed;
-        }
-      } else if (model === 'stable-diffusion') {
-        // Stable Diffusion parameters
-        replicateModel = "zedge/stable-diffusion:328e5d9bb8ece3bc78d873f6d9c23070c3d656221b24350e034f4a1a4548f275";
-        inputParams = {
-          prompt: prompt.trim(),
-          width: width || 1024,
-          height: height || 1024,
-          num_outputs: num_outputs || 1,
-          disable_nsfw_checker: disable_nsfw_checker || false,
-          remove_background: remove_background || false
-        };
+      // Add OpenAI API key if provided (optional - uses Replicate proxy if not set)
+      if (apiKey) {
+        inputParams.openai_api_key = apiKey;
+      }
 
-        // Add background removal options if enabled
-        if (remove_background) {
-          inputParams.threshold = threshold !== undefined ? threshold : 80;
-          inputParams.stray_removal = stray_removal !== undefined ? stray_removal : 0.01;
-          inputParams.trim_background = trim_background || false;
-          if (trim_background) {
-            inputParams.padding = padding !== undefined ? padding : 0;
-          }
-        }
+      // Add input_fidelity parameter
+      if (input_fidelity) {
+        inputParams.input_fidelity = input_fidelity;
+      }
 
-        // Add seed if provided (negative for random)
-        if (seed !== undefined && seed !== null) {
-          inputParams.seed = seed;
-        } else {
-          inputParams.seed = -1; // Stable Diffusion uses -1 for random
-        }
-      } else if (model === 'openai-image-1.5') {
-        // GPT Image 1.5 via Replicate API (supports reference images)
-        replicateModel = "openai/gpt-image-1.5";
+      // Add user_id if provided
+      if (user_id) {
+        inputParams.user_id = user_id;
+      }
 
-        // OpenAI API key is optional - Replicate uses proxy if not provided
-        const apiKey = openai_api_key || process.env.OPENAI_API_KEY;
-
-        // Map aspect_ratio to supported values (1:1, 3:2, 2:3)
-        let mappedAspectRatio = '1:1';
-        if (aspect_ratio === '3:2' || aspect_ratio === '4:3' || aspect_ratio === '16:9' || aspect_ratio === '21:9') {
-          mappedAspectRatio = '3:2';
-        } else if (aspect_ratio === '2:3' || aspect_ratio === '3:4' || aspect_ratio === '9:16') {
-          mappedAspectRatio = '2:3';
-        }
-
-        inputParams = {
-          prompt: prompt.trim(),
-          aspect_ratio: mappedAspectRatio,
-          quality: quality || 'auto',
-          number_of_images: Math.min(number_of_images || 1, 10),
-          output_format: output_format || 'webp',
-          output_compression: output_compression || 90,
-          background: background || 'auto',
-          moderation: moderation || 'auto'
-        };
-
-        // Add OpenAI API key if provided (optional - uses Replicate proxy if not set)
-        if (apiKey) {
-          inputParams.openai_api_key = apiKey;
-        }
-
-        // Add input_fidelity parameter
-        if (input_fidelity) {
-          inputParams.input_fidelity = input_fidelity;
-        }
-
-        // Add user_id if provided
-        if (user_id) {
-          inputParams.user_id = user_id;
-        }
-
-        // Add input images if provided (reference images)
-        if (input_images && Array.isArray(input_images) && input_images.length > 0) {
-          console.log(`Adding ${input_images.length} reference image(s)`);
-          inputParams.input_images = input_images;
-        }
-      } else {
-        // SeedreamS-3 parameters
-        replicateModel = "bytedance/seedream-3";
-        inputParams = {
-          prompt: prompt.trim(),
-          aspect_ratio: aspect_ratio,
-          size: size || 'regular',
-          guidance_scale: guidance_scale || 3.5
-        };
-
-        // Add seed if provided or use random
-        if (seed !== undefined && seed !== null) {
-          inputParams.seed = seed;
-        } else {
-          inputParams.seed = Math.floor(Math.random() * 1000000);
-        }
+      // Add input images if provided (reference images)
+      if (input_images && Array.isArray(input_images) && input_images.length > 0) {
+        console.log(`Adding ${input_images.length} reference image(s)`);
+        inputParams.input_images = input_images;
       }
 
       console.log('Input parameters:', inputParams);
@@ -338,8 +209,8 @@ app.post('/api/generate', async (req, res) => {
         imageUrl: imageUrl,
         prompt: prompt.trim(),
         timestamp: new Date().toISOString(),
-        model: model,
-        modelName: modelName,
+        model: 'openai-image-1.5',
+        modelName: 'OpenAI Image 1.5',
         replicateModel: replicateModel,
         parameters: inputParams,
         success: true
@@ -356,59 +227,7 @@ app.post('/api/generate', async (req, res) => {
         response: replicateError.response
       });
 
-      // Try fallback with different parameters if model fails
-      if (replicateError.message?.includes('not found') || replicateError.status === 404) {
-        console.log(`Trying ${modelName} with fallback parameters...`);
-
-        try {
-          let fallbackParams;
-
-          if (model === 'flux-schnell') {
-            // For Flux Schnell, try with minimal steps and lower quality
-            fallbackParams = {
-              ...inputParams,
-              num_inference_steps: 1,  // Fastest setting
-              megapixels: '0.25'        // Smallest size
-            };
-          } else {
-            // For SeedreamS-3, downgrade size if big fails
-            fallbackParams = {
-              prompt: prompt.trim(),
-              aspect_ratio: aspect_ratio,
-              size: size === 'big' ? 'regular' : size,
-              guidance_scale: guidance_scale || 3.5,
-              seed: Math.floor(Math.random() * 1000000)
-            };
-          }
-
-          console.log('Fallback parameters:', fallbackParams);
-
-          const fallbackOutput = await replicate.run(replicateModel, {
-            input: fallbackParams
-          });
-
-          const fallbackImageUrl = Array.isArray(fallbackOutput) ? fallbackOutput[0] : fallbackOutput;
-
-          console.log('Fallback generation successful');
-
-          res.json({
-            imageUrl: fallbackImageUrl,
-            prompt: prompt.trim(),
-            timestamp: new Date().toISOString(),
-            model: `${model}-fallback`,
-            modelName: `${modelName} (fallback)`,
-            replicateModel: replicateModel,
-            parameters: fallbackParams,
-            success: true
-          });
-
-        } catch (fallbackError) {
-          console.error('Fallback also failed:', fallbackError);
-          throw replicateError; // Throw original error
-        }
-      } else {
-        throw replicateError;
-      }
+      throw replicateError;
     }
 
   } catch (error) {
@@ -419,8 +238,6 @@ app.post('/api/generate', async (req, res) => {
     let errorMessage = 'Image generation failed';
     let errorDetails = error.message;
 
-    const modelName = req.body.model === 'flux-schnell' ? 'Flux Schnell' : req.body.model === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : req.body.model === 'stable-diffusion' ? 'Stable Diffusion' : req.body.model === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3';
-
     if (error.message?.includes('auth') || error.message?.includes('token')) {
       statusCode = 401;
       errorMessage = 'Authentication failed';
@@ -428,7 +245,7 @@ app.post('/api/generate', async (req, res) => {
     } else if (error.message?.includes('not found')) {
       statusCode = 404;
       errorMessage = 'Model not found';
-      errorDetails = `The ${modelName} model is not available`;
+      errorDetails = 'The OpenAI Image 1.5 model is not available';
     } else if (error.message?.includes('rate limit')) {
       statusCode = 429;
       errorMessage = 'Rate limit exceeded';
@@ -534,7 +351,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     features: {
-      models: ['seedream', 'flux-schnell', 'flux-1.1-pro', 'stable-diffusion', 'openai-image-1.5'],
+      models: ['openai-image-1.5'],
       dpiProcessing: true
     }
   });
@@ -549,5 +366,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`AI Art Generator running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log(`Replicate API: ${process.env.REPLICATE_API_TOKEN ? 'Configured' : 'Missing'}`);
-  console.log('Supported models: SeedreamS-3, Flux Schnell, Flux 1.1 Pro, Stable Diffusion, OpenAI Image 1.5');
+  console.log('Supported model: OpenAI Image 1.5');
 });

@@ -11,46 +11,10 @@ export default function GenerateTab() {
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [generationProgress, setGenerationProgress] = useState(0);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [artworkType, setArtworkType] = useState('tv'); // 'tv' or 'wall'
-  const [selectedModel, setSelectedModel] = useState('seedream'); // 'seedream', 'flux-schnell', 'flux-1.1-pro', 'stable-diffusion', or 'openai-image-1.5'
   const [regeneratingIndex, setRegeneratingIndex] = useState(null); // Track which image is being regenerated
 
-  // SeedreamS-3 Parameters
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [size, setSize] = useState('big');
-  const [guidanceScale, setGuidanceScale] = useState(3.5);
-  const [useRandomSeed, setUseRandomSeed] = useState(true);
-
-  // Flux Schnell Parameters
-  const [numInferenceSteps, setNumInferenceSteps] = useState(4);
-  const [goFast, setGoFast] = useState(true);
-  const [megapixels, setMegapixels] = useState('1');
-  const [outputFormat, setOutputFormat] = useState('webp');
-  const [outputQuality, setOutputQuality] = useState(80);
-  const [disableSafetyChecker, setDisableSafetyChecker] = useState(false);
-
-  // Flux 1.1 Pro Parameters
-  const [safetyTolerance, setSafetyTolerance] = useState(2);
-  const [promptUpsampling, setPromptUpsampling] = useState(false);
-  const [fluxWidth, setFluxWidth] = useState(1024);
-  const [fluxHeight, setFluxHeight] = useState(1024);
-  const [imagePromptUrl, setImagePromptUrl] = useState('');
-  const [imagePromptFile, setImagePromptFile] = useState(null);
-  const [imagePromptPreview, setImagePromptPreview] = useState(null);
-  const [imagePromptMode, setImagePromptMode] = useState('upload'); // 'upload' or 'url'
-
-  // Stable Diffusion Parameters
-  const [sdWidth, setSdWidth] = useState(1024);
-  const [sdHeight, setSdHeight] = useState(1024);
-  const [sdNumOutputs, setSdNumOutputs] = useState(1);
-  const [sdDisableNsfwChecker, setSdDisableNsfwChecker] = useState(false);
-  const [sdRemoveBackground, setSdRemoveBackground] = useState(false);
-  const [sdThreshold, setSdThreshold] = useState(80);
-  const [sdStrayRemoval, setSdStrayRemoval] = useState(0.01);
-  const [sdTrimBackground, setSdTrimBackground] = useState(false);
-  const [sdPadding, setSdPadding] = useState(0);
-
   // OpenAI Image 1.5 Parameters
+  const [aspectRatio, setAspectRatio] = useState('1:1');
   const [openaiQuality, setOpenaiQuality] = useState('auto');
   const [openaiBackground, setOpenaiBackground] = useState('auto');
   const [openaiModeration, setOpenaiModeration] = useState('auto');
@@ -72,34 +36,6 @@ export default function GenerateTab() {
       reader.readAsDataURL(file);
     });
   }, []);
-
-  // Handle image drop for reference image
-  const onImageDrop = useCallback((acceptedFiles) => {
-    if (acceptedFiles[0]) {
-      const file = acceptedFiles[0];
-      setImagePromptFile(file);
-      setImagePromptPreview(URL.createObjectURL(file));
-      setImagePromptUrl(''); // Clear URL when file is uploaded
-      toast.success('Reference image uploaded');
-    }
-  }, []);
-
-  // Clear the uploaded reference image
-  const clearImagePrompt = useCallback(() => {
-    if (imagePromptPreview) {
-      URL.revokeObjectURL(imagePromptPreview);
-    }
-    setImagePromptFile(null);
-    setImagePromptPreview(null);
-    setImagePromptUrl('');
-  }, [imagePromptPreview]);
-
-  // Dropzone for reference image
-  const imagePromptDropzone = useDropzone({
-    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp'] },
-    multiple: false,
-    onDrop: onImageDrop
-  });
 
   // Handle OpenAI input images drop
   const onOpenaiImageDrop = useCallback((acceptedFiles) => {
@@ -143,7 +79,7 @@ export default function GenerateTab() {
     }
 
     console.log('🎨 Starting generation for prompts:', promptLines);
-    console.log('📐 Using parameters:', { aspectRatio, size, guidanceScale, useRandomSeed });
+    console.log('📐 Using parameters:', { aspectRatio, openaiQuality, openaiBackground });
 
     setGenerating(true);
     setResults([]);
@@ -161,98 +97,34 @@ export default function GenerateTab() {
         console.log(`🎯 Processing prompt ${i + 1}/${totalPrompts}: "${prompt}"`);
 
         try {
-          // Prepare generation parameters based on selected model
+          // Prepare generation parameters for OpenAI Image 1.5
           const requestBody = {
             prompt,
-            model: selectedModel,
-            aspect_ratio: aspectRatio
+            model: 'openai-image-1.5',
+            aspect_ratio: aspectRatio,
+            quality: openaiQuality,
+            background: openaiBackground,
+            moderation: openaiModeration,
+            output_format: openaiOutputFormat,
+            input_fidelity: openaiInputFidelity,
+            number_of_images: openaiNumberOfImages,
+            output_compression: openaiOutputCompression
           };
 
-          // Add model-specific parameters
-          if (selectedModel === 'seedream') {
-            requestBody.size = size;
-            requestBody.guidance_scale = guidanceScale;
-            // Handle seed parameter
-            if (useRandomSeed) {
-              requestBody.seed = Math.floor(Math.random() * 1000000);
-            }
-          } else if (selectedModel === 'flux-schnell') {
-            requestBody.num_inference_steps = numInferenceSteps;
-            requestBody.go_fast = goFast;
-            requestBody.megapixels = megapixels;
-            requestBody.output_format = outputFormat;
-            requestBody.output_quality = outputQuality;
-            requestBody.disable_safety_checker = disableSafetyChecker;
-            // Handle seed parameter
-            if (useRandomSeed) {
-              requestBody.seed = Math.floor(Math.random() * 1000000);
-            }
-          } else if (selectedModel === 'flux-1.1-pro') {
-            requestBody.output_format = outputFormat;
-            requestBody.output_quality = outputQuality;
-            requestBody.safety_tolerance = safetyTolerance;
-            requestBody.prompt_upsampling = promptUpsampling;
-            // Add custom width/height when using custom aspect ratio
-            if (aspectRatio === 'custom') {
-              requestBody.width = fluxWidth;
-              requestBody.height = fluxHeight;
-            }
-            // Add image prompt for Flux Redux if provided (file or URL)
-            if (imagePromptFile) {
-              // Convert file to base64 data URI
-              const base64Image = await fileToBase64(imagePromptFile);
-              requestBody.image_prompt = base64Image;
-            } else if (imagePromptUrl.trim()) {
-              requestBody.image_prompt = imagePromptUrl.trim();
-            }
-            // Handle seed parameter
-            if (useRandomSeed) {
-              requestBody.seed = Math.floor(Math.random() * 1000000);
-            }
-          } else if (selectedModel === 'stable-diffusion') {
-            requestBody.width = sdWidth;
-            requestBody.height = sdHeight;
-            requestBody.num_outputs = sdNumOutputs;
-            requestBody.disable_nsfw_checker = sdDisableNsfwChecker;
-            requestBody.remove_background = sdRemoveBackground;
-            // Background removal options
-            if (sdRemoveBackground) {
-              requestBody.threshold = sdThreshold;
-              requestBody.stray_removal = sdStrayRemoval;
-              requestBody.trim_background = sdTrimBackground;
-              if (sdTrimBackground) {
-                requestBody.padding = sdPadding;
-              }
-            }
-            // Handle seed parameter
-            if (useRandomSeed) {
-              requestBody.seed = Math.floor(Math.random() * 1000000);
-            } else {
-              requestBody.seed = -1; // Stable Diffusion uses -1 for random
-            }
-          } else if (selectedModel === 'openai-image-1.5') {
-            requestBody.quality = openaiQuality;
-            requestBody.background = openaiBackground;
-            requestBody.moderation = openaiModeration;
-            requestBody.output_format = openaiOutputFormat;
-            requestBody.input_fidelity = openaiInputFidelity;
-            requestBody.number_of_images = openaiNumberOfImages;
-            requestBody.output_compression = openaiOutputCompression;
-            // Add API key if provided
-            if (openaiApiKey.trim()) {
-              requestBody.openai_api_key = openaiApiKey.trim();
-            }
-            // Add user ID if provided
-            if (openaiUserId.trim()) {
-              requestBody.user_id = openaiUserId.trim();
-            }
-            // Add input images if provided
-            if (openaiInputImages.length > 0) {
-              const base64Images = await Promise.all(
-                openaiInputImages.map(file => fileToBase64(file))
-              );
-              requestBody.input_images = base64Images;
-            }
+          // Add API key if provided
+          if (openaiApiKey.trim()) {
+            requestBody.openai_api_key = openaiApiKey.trim();
+          }
+          // Add user ID if provided
+          if (openaiUserId.trim()) {
+            requestBody.user_id = openaiUserId.trim();
+          }
+          // Add input images if provided
+          if (openaiInputImages.length > 0) {
+            const base64Images = await Promise.all(
+              openaiInputImages.map(file => fileToBase64(file))
+            );
+            requestBody.input_images = base64Images;
           }
 
           console.log('📋 Request body:', requestBody);
@@ -272,12 +144,12 @@ export default function GenerateTab() {
             const result = {
               ...responseData,
               id: Date.now() + Math.random(),
-              model: selectedModel,
+              model: 'openai-image-1.5',
               parameters: requestBody
             };
             newResults.push(result);
             console.log(`✅ Successfully generated image for: "${prompt}"`);
-            console.log(`📐 Generated with model: ${selectedModel}`);
+            console.log(`📐 Generated with OpenAI Image 1.5`);
             toast.success(`Generated image ${i + 1}/${totalPrompts}`);
           } else {
             console.error(`❌ Failed to generate image for: "${prompt}"`, responseData);
@@ -298,8 +170,7 @@ export default function GenerateTab() {
       setResults(newResults);
 
       if (newResults.length > 0) {
-        const modelName = selectedModel === 'flux-schnell' ? 'Flux Schnell' : selectedModel === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : selectedModel === 'stable-diffusion' ? 'Stable Diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3';
-        toast.success(`Generated ${newResults.length} image(s) with ${modelName}!`, {
+        toast.success(`Generated ${newResults.length} image(s) with OpenAI Image 1.5!`, {
           icon: '🎨',
           duration: 4000
         });
@@ -440,11 +311,6 @@ export default function GenerateTab() {
       // Use the same parameters from the original generation
       const requestBody = { ...result.parameters };
 
-      // Generate new random seed if random seed was used
-      if (result.parameters.seed && useRandomSeed) {
-        requestBody.seed = Math.floor(Math.random() * 1000000);
-      }
-
       console.log('📋 Regeneration request body:', requestBody);
 
       const response = await fetch('/api/generate', {
@@ -483,18 +349,6 @@ export default function GenerateTab() {
     }
   };
 
-  // Switch artwork type and update preset settings
-  const switchArtworkType = (type) => {
-    setArtworkType(type);
-    if (type === 'tv') {
-      setAspectRatio('16:9');
-      setSize('big');
-    } else if (type === 'wall') {
-      setAspectRatio('3:4'); // Using 3:4 (closest valid ratio to 4:5 for 16x20" prints)
-      setSize('big');
-    }
-  };
-
   return (
     <div className="space-y-8">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-3xl p-8 border border-white/20">
@@ -502,18 +356,8 @@ export default function GenerateTab() {
           <h3 className="text-2xl font-semibold text-slate-800 flex items-center gap-3">
             <Sparkles className="w-6 h-6 text-accent-500" />
             AI Art Generation
-            <span className={`text-sm px-2 py-1 rounded-full ${
-              selectedModel === 'flux-schnell'
-                ? 'bg-blue-100 text-blue-700'
-                : selectedModel === 'flux-1.1-pro'
-                ? 'bg-emerald-100 text-emerald-700'
-                : selectedModel === 'stable-diffusion'
-                ? 'bg-orange-100 text-orange-700'
-                : selectedModel === 'openai-image-1.5'
-                ? 'bg-cyan-100 text-cyan-700'
-                : 'bg-purple-100 text-purple-700'
-            }`}>
-              {selectedModel === 'flux-schnell' ? 'Flux Schnell' : selectedModel === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : selectedModel === 'stable-diffusion' ? 'Stable Diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3'}
+            <span className="text-sm px-2 py-1 rounded-full bg-cyan-100 text-cyan-700">
+              OpenAI Image 1.5
             </span>
           </h3>
           <div className="flex gap-2">
@@ -530,152 +374,6 @@ export default function GenerateTab() {
             >
               Test Connection
             </button>
-          </div>
-        </div>
-
-        {/* Model Selection */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-slate-700 mb-3">AI Model</label>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setSelectedModel('seedream')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                selectedModel === 'seedream'
-                  ? 'border-purple-500 bg-purple-50'
-                  : 'border-slate-200 bg-white hover:border-purple-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${selectedModel === 'seedream' ? 'text-purple-700' : 'text-slate-700'}`}>
-                  SeedreamS-3
-                </h4>
-                <p className="text-sm text-slate-600">High-quality artistic images with guidance control</p>
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setSelectedModel('flux-schnell')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                selectedModel === 'flux-schnell'
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-200 bg-white hover:border-blue-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${selectedModel === 'flux-schnell' ? 'text-blue-700' : 'text-slate-700'}`}>
-                  Flux Schnell
-                </h4>
-                <p className="text-sm text-slate-600">Fast, high-quality image generation (1-4 steps)</p>
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setSelectedModel('flux-1.1-pro')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                selectedModel === 'flux-1.1-pro'
-                  ? 'border-emerald-500 bg-emerald-50'
-                  : 'border-slate-200 bg-white hover:border-emerald-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${selectedModel === 'flux-1.1-pro' ? 'text-emerald-700' : 'text-slate-700'}`}>
-                  Flux 1.1 Pro
-                </h4>
-                <p className="text-sm text-slate-600">Premium quality with prompt upsampling</p>
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setSelectedModel('stable-diffusion')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                selectedModel === 'stable-diffusion'
-                  ? 'border-orange-500 bg-orange-50'
-                  : 'border-slate-200 bg-white hover:border-orange-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${selectedModel === 'stable-diffusion' ? 'text-orange-700' : 'text-slate-700'}`}>
-                  Stable Diffusion
-                </h4>
-                <p className="text-sm text-slate-600">Classic SD with background removal options</p>
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setSelectedModel('openai-image-1.5')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                selectedModel === 'openai-image-1.5'
-                  ? 'border-cyan-500 bg-cyan-50'
-                  : 'border-slate-200 bg-white hover:border-cyan-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${selectedModel === 'openai-image-1.5' ? 'text-cyan-700' : 'text-slate-700'}`}>
-                  OpenAI Image 1.5
-                </h4>
-                <p className="text-sm text-slate-600">Latest OpenAI image generation with quality control</p>
-              </div>
-            </motion.button>
-          </div>
-        </div>
-
-        {/* Artwork Type Selection */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-slate-700 mb-3">Artwork Type</label>
-          <div className="grid grid-cols-2 gap-4">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => switchArtworkType('tv')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                artworkType === 'tv'
-                  ? 'border-accent-500 bg-accent-50'
-                  : 'border-slate-200 bg-white hover:border-accent-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${artworkType === 'tv' ? 'text-accent-700' : 'text-slate-700'}`}>
-                  TV Artwork
-                </h4>
-                <p className="text-sm text-slate-600 mb-2">For Samsung Frame TV and digital displays</p>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span className="bg-slate-100 px-2 py-1 rounded">16:9 aspect ratio</span>
-                  <span className="bg-slate-100 px-2 py-1 rounded">2048px max</span>
-                </div>
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => switchArtworkType('wall')}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                artworkType === 'wall'
-                  ? 'border-primary-500 bg-primary-50'
-                  : 'border-slate-200 bg-white hover:border-primary-300'
-              }`}
-            >
-              <div className="text-left">
-                <h4 className={`font-semibold mb-1 ${artworkType === 'wall' ? 'text-primary-700' : 'text-slate-700'}`}>
-                  Wall Artwork
-                </h4>
-                <p className="text-sm text-slate-600 mb-2">For printing and wall display (16x20")</p>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span className="bg-slate-100 px-2 py-1 rounded">3:4 aspect ratio</span>
-                  <span className="bg-slate-100 px-2 py-1 rounded">2048px max</span>
-                </div>
-              </div>
-            </motion.button>
           </div>
         </div>
 
@@ -698,520 +396,11 @@ export default function GenerateTab() {
                   onChange={(e) => setAspectRatio(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
                 >
-                  {selectedModel === 'flux-1.1-pro' && (
-                    <option value="custom">Custom (set width/height)</option>
-                  )}
                   <option value="1:1">Square (1:1)</option>
-                  <option value="16:9">TV Landscape (16:9)</option>
-                  <option value="3:4">Wall Portrait (3:4 / Similar to 16x20")</option>
-                  <option value="9:16">Portrait (9:16)</option>
-                  <option value="4:3">Classic (4:3)</option>
-                  {selectedModel === 'flux-1.1-pro' && (
-                    <>
-                      <option value="4:5">Portrait (4:5)</option>
-                      <option value="5:4">Landscape (5:4)</option>
-                    </>
-                  )}
-                  {selectedModel !== 'flux-1.1-pro' && (
-                    <option value="21:9">Ultra-wide (21:9)</option>
-                  )}
-                  <option value="3:2">Camera (3:2)</option>
-                  <option value="2:3">Vertical (2:3)</option>
+                  <option value="3:2">Landscape (3:2)</option>
+                  <option value="2:3">Portrait (2:3)</option>
                 </select>
               </div>
-
-              {selectedModel === 'seedream' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">Image Size</label>
-                    <select
-                      value={size}
-                      onChange={(e) => setSize(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-                    >
-                      <option value="small">Small (512px min)</option>
-                      <option value="regular">Regular (1MP)</option>
-                      <option value="big">Big (2048px max)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Guidance Scale: {guidanceScale}
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      step="0.5"
-                      value={guidanceScale}
-                      onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>Creative</span>
-                      <span>Literal</span>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {selectedModel === 'flux-schnell' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Inference Steps: {numInferenceSteps}
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="4"
-                      step="1"
-                      value={numInferenceSteps}
-                      onChange={(e) => setNumInferenceSteps(parseInt(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>Faster</span>
-                      <span>Higher Quality</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">Megapixels</label>
-                    <select
-                      value={megapixels}
-                      onChange={(e) => setMegapixels(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-                    >
-                      <option value="0.25">0.25 MP (Small)</option>
-                      <option value="1">1 MP (Standard)</option>
-                    </select>
-                  </div>
-                </>
-              )}
-
-              {selectedModel === 'flux-1.1-pro' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Safety Tolerance: {safetyTolerance}
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="6"
-                      step="1"
-                      value={safetyTolerance}
-                      onChange={(e) => setSafetyTolerance(parseInt(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>Strict</span>
-                      <span>Permissive</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={promptUpsampling}
-                        onChange={(e) => setPromptUpsampling(e.target.checked)}
-                        className="rounded"
-                      />
-                      <span className="text-sm text-slate-600">Prompt upsampling (more creative)</span>
-                    </label>
-                  </div>
-                </>
-              )}
-
-              {/* Custom Width/Height for Flux 1.1 Pro */}
-              {selectedModel === 'flux-1.1-pro' && aspectRatio === 'custom' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Width: {fluxWidth}px
-                    </label>
-                    <input
-                      type="range"
-                      min="256"
-                      max="1440"
-                      step="32"
-                      value={fluxWidth}
-                      onChange={(e) => setFluxWidth(parseInt(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>256</span>
-                      <span>1440</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Height: {fluxHeight}px
-                    </label>
-                    <input
-                      type="range"
-                      min="256"
-                      max="1440"
-                      step="32"
-                      value={fluxHeight}
-                      onChange={(e) => setFluxHeight(parseInt(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>256</span>
-                      <span>1440</span>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {selectedModel === 'flux-schnell' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Output Format</label>
-                  <select
-                    value={outputFormat}
-                    onChange={(e) => setOutputFormat(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-                  >
-                    <option value="webp">WebP</option>
-                    <option value="jpg">JPG</option>
-                    <option value="png">PNG</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Quality: {outputQuality}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="10"
-                    value={outputQuality}
-                    onChange={(e) => setOutputQuality(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2 justify-center">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={goFast}
-                      onChange={(e) => setGoFast(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-600">Fast mode (FP8)</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={disableSafetyChecker}
-                      onChange={(e) => setDisableSafetyChecker(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-600">Disable safety checker</span>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {selectedModel === 'flux-1.1-pro' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Output Format</label>
-                  <select
-                    value={outputFormat}
-                    onChange={(e) => setOutputFormat(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-                  >
-                    <option value="webp">WebP</option>
-                    <option value="jpg">JPG</option>
-                    <option value="png">PNG</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Quality: {outputQuality}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="10"
-                    value={outputQuality}
-                    onChange={(e) => setOutputQuality(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Image Prompt (Flux Redux)
-                    <span className="text-xs text-slate-400 ml-2">Optional - guide generation with a reference image</span>
-                  </label>
-
-                  {/* Mode Toggle */}
-                  <div className="flex gap-2 mb-3">
-                    <button
-                      type="button"
-                      onClick={() => setImagePromptMode('upload')}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        imagePromptMode === 'upload'
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      <Upload className="w-4 h-4" />
-                      Upload
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setImagePromptMode('url')}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        imagePromptMode === 'url'
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      <Link className="w-4 h-4" />
-                      URL
-                    </button>
-                  </div>
-
-                  {/* Upload Mode */}
-                  {imagePromptMode === 'upload' && (
-                    <>
-                      {imagePromptPreview ? (
-                        <div className="relative inline-block">
-                          <img
-                            src={imagePromptPreview}
-                            alt="Reference"
-                            className="h-24 w-auto rounded-lg border border-slate-300 object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={clearImagePrompt}
-                            className="absolute -top-2 -right-2 p-1 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md transition-colors"
-                            title="Remove image"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                          <p className="text-xs text-slate-500 mt-1">{imagePromptFile?.name}</p>
-                        </div>
-                      ) : (
-                        <div
-                          {...imagePromptDropzone.getRootProps()}
-                          className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${
-                            imagePromptDropzone.isDragActive
-                              ? 'border-emerald-400 bg-emerald-50'
-                              : 'border-slate-300 hover:border-emerald-400 hover:bg-slate-50'
-                          }`}
-                        >
-                          <input {...imagePromptDropzone.getInputProps()} />
-                          <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                          <p className="text-sm text-slate-600">
-                            {imagePromptDropzone.isDragActive
-                              ? 'Drop image here...'
-                              : 'Drag & drop or click to upload'}
-                          </p>
-                          <p className="text-xs text-slate-400 mt-1">JPG, PNG, GIF, WebP</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* URL Mode */}
-                  {imagePromptMode === 'url' && (
-                    <input
-                      type="url"
-                      value={imagePromptUrl}
-                      onChange={(e) => {
-                        setImagePromptUrl(e.target.value);
-                        // Clear file if URL is entered
-                        if (e.target.value && imagePromptFile) {
-                          clearImagePrompt();
-                        }
-                      }}
-                      placeholder="https://example.com/reference-image.jpg"
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-                    />
-                  )}
-
-                  <p className="text-xs text-slate-500 mt-2">
-                    Provide an image to guide the generation towards its composition
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {selectedModel === 'stable-diffusion' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Width: {sdWidth}px
-                  </label>
-                  <input
-                    type="range"
-                    min="512"
-                    max="1536"
-                    step="64"
-                    value={sdWidth}
-                    onChange={(e) => setSdWidth(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-slate-500 mt-1">
-                    <span>512</span>
-                    <span>1536</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Height: {sdHeight}px
-                  </label>
-                  <input
-                    type="range"
-                    min="512"
-                    max="1536"
-                    step="64"
-                    value={sdHeight}
-                    onChange={(e) => setSdHeight(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-slate-500 mt-1">
-                    <span>512</span>
-                    <span>1536</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Number of Outputs: {sdNumOutputs}
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="4"
-                    step="1"
-                    value={sdNumOutputs}
-                    onChange={(e) => setSdNumOutputs(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-slate-500 mt-1">
-                    <span>1</span>
-                    <span>4</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 justify-center">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={sdDisableNsfwChecker}
-                      onChange={(e) => setSdDisableNsfwChecker(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-600">Disable safety checker</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={sdRemoveBackground}
-                      onChange={(e) => setSdRemoveBackground(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-600">Remove background</span>
-                  </label>
-                </div>
-
-                {sdRemoveBackground && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-600 mb-2">
-                        Transparency Threshold: {sdThreshold}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="255"
-                        step="5"
-                        value={sdThreshold}
-                        onChange={(e) => setSdThreshold(parseInt(e.target.value))}
-                        className="w-full"
-                      />
-                      <div className="flex justify-between text-xs text-slate-500 mt-1">
-                        <span>Less transparent</span>
-                        <span>More transparent</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-slate-600 mb-2">
-                        Stray Removal: {(sdStrayRemoval * 100).toFixed(1)}%
-                      </label>
-                      <input
-                        type="range"
-                        min="0.001"
-                        max="0.3"
-                        step="0.01"
-                        value={sdStrayRemoval}
-                        onChange={(e) => setSdStrayRemoval(parseFloat(e.target.value))}
-                        className="w-full"
-                      />
-                      <div className="flex justify-between text-xs text-slate-500 mt-1">
-                        <span>Keep more</span>
-                        <span>Remove more</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {selectedModel === 'stable-diffusion' && sdRemoveBackground && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div className="flex items-center">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={sdTrimBackground}
-                      onChange={(e) => setSdTrimBackground(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-600">Trim transparent background</span>
-                  </label>
-                </div>
-
-                {sdTrimBackground && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Padding: {sdPadding}px
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="5"
-                      value={sdPadding}
-                      onChange={(e) => setSdPadding(parseInt(e.target.value))}
-                      className="w-full"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedModel === 'openai-image-1.5' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">Quality</label>
                   <select
@@ -1393,32 +582,11 @@ export default function GenerateTab() {
                   )}
                 </div>
               </div>
-            )}
-
-            <div className="mt-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={useRandomSeed}
-                  onChange={(e) => setUseRandomSeed(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm text-slate-600">Use random seed for variety</span>
-              </label>
-            </div>
 
             {/* Current Settings Display */}
             <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
               <div className="text-sm text-blue-700">
-                <strong>Current Settings:</strong> {selectedModel !== 'stable-diffusion' && selectedModel !== 'openai-image-1.5' ? aspectRatio : selectedModel === 'stable-diffusion' ? `${sdWidth}×${sdHeight}px` : aspectRatio}
-                {selectedModel === 'flux-1.1-pro' && aspectRatio === 'custom' && ` (${fluxWidth}×${fluxHeight}px)`} •
-                {selectedModel === 'seedream' && ` ${size} • Guidance: ${guidanceScale}`}
-                {selectedModel === 'flux-schnell' && ` ${megapixels}MP • Steps: ${numInferenceSteps} • ${outputFormat.toUpperCase()}`}
-                {selectedModel === 'flux-1.1-pro' && ` Safety: ${safetyTolerance} • ${outputFormat.toUpperCase()} • ${promptUpsampling ? 'Upsampling ON' : 'Upsampling OFF'}`}
-                {selectedModel === 'flux-1.1-pro' && (imagePromptFile || imagePromptUrl.trim()) && ' • Redux: ON'}
-                {selectedModel === 'stable-diffusion' && ` Outputs: ${sdNumOutputs} • ${sdRemoveBackground ? 'BG Remove: ON' : 'BG Remove: OFF'}`}
-                {selectedModel === 'openai-image-1.5' && ` Quality: ${openaiQuality} • BG: ${openaiBackground} • ${openaiOutputFormat.toUpperCase()} • Images: ${openaiNumberOfImages}`}
-                {selectedModel !== 'openai-image-1.5' && ' • Seed: ' + (useRandomSeed ? 'Random' : 'Fixed')}
+                <strong>Current Settings:</strong> {aspectRatio} • Quality: {openaiQuality} • BG: {openaiBackground} • {openaiOutputFormat.toUpperCase()} • Images: {openaiNumberOfImages}
               </div>
             </div>
           </motion.div>
@@ -1439,7 +607,7 @@ cyberpunk city at night"
             className="w-full px-4 py-4 bg-white/70 border border-white/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent-500 resize-none font-mono text-sm"
           />
           <p className="text-xs text-slate-500 mt-2">
-            Each line will generate one image. Be descriptive for better results with {selectedModel === 'flux-schnell' ? 'Flux Schnell' : selectedModel === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : selectedModel === 'stable-diffusion' ? 'Stable Diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3'}.
+            Each line will generate one image. Be descriptive for better results with OpenAI Image 1.5.
           </p>
         </div>
 
@@ -1449,7 +617,7 @@ cyberpunk city at night"
             <div className="flex items-center gap-2 mb-2">
               <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
               <span className="text-sm font-medium text-blue-700">
-                Generating with {selectedModel === 'flux-schnell' ? 'Flux Schnell' : selectedModel === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : selectedModel === 'stable-diffusion' ? 'Stable Diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3'}...
+                Generating with OpenAI Image 1.5...
               </span>
             </div>
             {currentPrompt && (
@@ -1479,7 +647,7 @@ cyberpunk city at night"
           ) : (
             <>
               <Zap className="w-5 h-5" />
-              Generate with {selectedModel === 'flux-schnell' ? 'Flux Schnell' : selectedModel === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : selectedModel === 'stable-diffusion' ? 'Stable Diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3'}
+              Generate with OpenAI Image 1.5
             </>
           )}
         </motion.button>
@@ -1576,54 +744,15 @@ cyberpunk city at night"
                   <p className="text-sm text-slate-600 mb-2 overflow-hidden" style={{display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical'}}>{result.prompt}</p>
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex flex-col gap-1">
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        result.model === 'flux-schnell'
-                          ? 'bg-blue-50 text-blue-600'
-                          : result.model === 'flux-1.1-pro'
-                          ? 'bg-emerald-50 text-emerald-600'
-                          : result.model === 'stable-diffusion'
-                          ? 'bg-orange-50 text-orange-600'
-                          : result.model === 'openai-image-1.5'
-                          ? 'bg-cyan-50 text-cyan-600'
-                          : 'bg-purple-50 text-purple-600'
-                      }`}>
-                        {result.model === 'flux-schnell' ? 'Flux Schnell' : result.model === 'flux-1.1-pro' ? 'Flux 1.1 Pro' : result.model === 'stable-diffusion' ? 'Stable Diffusion' : result.model === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'SeedreamS-3'}
+                      <span className="text-xs px-2 py-0.5 rounded bg-cyan-50 text-cyan-600">
+                        OpenAI Image 1.5
                       </span>
                       <span className="text-slate-400">
-                        {result.model === 'stable-diffusion' ? `${result.parameters?.width}×${result.parameters?.height}px` : result.parameters?.aspect_ratio}
-                        {result.model === 'flux-1.1-pro' && result.parameters?.aspect_ratio === 'custom' && result.parameters?.width && ` (${result.parameters.width}×${result.parameters.height})`}
-                        {result.model === 'seedream' && result.parameters?.size && ` • ${result.parameters.size}`}
-                        {result.model === 'flux-schnell' && result.parameters?.megapixels && ` • ${result.parameters.megapixels}MP`}
-                        {result.model === 'stable-diffusion' && result.parameters?.num_outputs > 1 && ` • ${result.parameters.num_outputs} outputs`}
+                        {result.parameters?.aspect_ratio} • Quality: {result.parameters?.quality}
                       </span>
-                      {result.model === 'seedream' && result.parameters?.guidance_scale && (
+                      {result.parameters?.input_images && result.parameters.input_images.length > 0 && (
                         <span className="text-slate-400">
-                          Guidance: {result.parameters.guidance_scale}
-                        </span>
-                      )}
-                      {result.model === 'flux-schnell' && result.parameters?.num_inference_steps && (
-                        <span className="text-slate-400">
-                          Steps: {result.parameters.num_inference_steps}
-                        </span>
-                      )}
-                      {result.model === 'flux-1.1-pro' && (
-                        <span className="text-slate-400">
-                          Safety: {result.parameters?.safety_tolerance} • {result.parameters?.prompt_upsampling ? 'Upsampling' : 'No upsampling'}
-                        </span>
-                      )}
-                      {result.model === 'flux-1.1-pro' && result.parameters?.image_prompt && (
-                        <span className="text-slate-400">
-                          Redux: ON
-                        </span>
-                      )}
-                      {result.model === 'stable-diffusion' && result.parameters?.remove_background && (
-                        <span className="text-slate-400">
-                          BG Remove: ON
-                        </span>
-                      )}
-                      {result.parameters?.seed && (
-                        <span className="text-slate-400">
-                          Seed: {result.parameters.seed}
+                          Reference images: {result.parameters.input_images.length}
                         </span>
                       )}
                     </div>
@@ -1655,15 +784,8 @@ cyberpunk city at night"
           <div className="mt-2 p-3 bg-slate-100 rounded-lg text-xs text-slate-600 max-w-md">
             <p>Check browser console (F12) for detailed logs</p>
             <p>API endpoint: /api/generate</p>
-            <p>Model: {selectedModel === 'flux-schnell' ? 'black-forest-labs/flux-schnell' : selectedModel === 'flux-1.1-pro' ? 'black-forest-labs/flux-1.1-pro' : selectedModel === 'stable-diffusion' ? 'zedge/stable-diffusion' : selectedModel === 'openai-image-1.5' ? 'OpenAI Image 1.5' : 'bytedance/seedream-3'}</p>
-            <p>Current settings: {selectedModel === 'stable-diffusion' ? `${sdWidth}×${sdHeight}` : selectedModel === 'openai-image-1.5' ? aspectRatio : aspectRatio}
-              {selectedModel === 'flux-1.1-pro' && aspectRatio === 'custom' ? ` (${fluxWidth}×${fluxHeight})` : ''} •
-              {selectedModel === 'seedream' && ` ${size} • Guidance: ${guidanceScale}`}
-              {selectedModel === 'flux-schnell' && ` ${megapixels}MP • Steps: ${numInferenceSteps}`}
-              {selectedModel === 'flux-1.1-pro' && ` Safety: ${safetyTolerance} • ${promptUpsampling ? 'Upsampling' : 'No upsampling'}`}
-              {selectedModel === 'stable-diffusion' && ` Outputs: ${sdNumOutputs} • ${sdRemoveBackground ? 'BG Remove' : 'No BG Remove'}`}
-              {selectedModel === 'openai-image-1.5' && ` Quality: ${openaiQuality} • Images: ${openaiNumberOfImages}`}
-            </p>
+            <p>Model: OpenAI Image 1.5</p>
+            <p>Current settings: {aspectRatio} • Quality: {openaiQuality} • Images: {openaiNumberOfImages}</p>
             <p className="mt-2 text-slate-500">💡 Tip: Click download buttons to save images locally</p>
           </div>
         </details>
