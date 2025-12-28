@@ -6,17 +6,37 @@ import { fileURLToPath } from 'url';
 import axios from 'axios';
 import Replicate from 'replicate';
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Persistent storage directory (mountable in Coolify)
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
+const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
+const CUSTOMER_DIR = path.join(UPLOADS_DIR, 'customer');
+
+// Ensure upload directories exist
+const ensureDirectories = () => {
+  [UPLOADS_DIR, GENERATED_DIR, CUSTOMER_DIR].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`Created directory: ${dir}`);
+    }
+  });
+};
+ensureDirectories();
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'build')));
+
+// Serve uploaded images statically
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 console.log('Starting AI Art Generator server...');
 
@@ -75,6 +95,85 @@ const safeFilename = (name) => {
     .replace(/[^a-z0-9.-]/g, '-')
     .replace(/-+/g, '-')
     .substring(0, 50) || 'file';
+};
+
+// Generate unique filename with timestamp
+const generateUniqueFilename = (prefix = 'image', ext = 'webp') => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const uniqueId = crypto.randomBytes(4).toString('hex');
+  return `${prefix}-${timestamp}-${uniqueId}.${ext}`;
+};
+
+// Save image from URL to persistent storage
+const saveImageFromUrl = async (imageUrl, category = 'generated', customFilename = null) => {
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    // Determine file extension from content-type or URL
+    const contentType = response.headers['content-type'] || '';
+    let ext = 'webp';
+    if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = 'jpg';
+    else if (contentType.includes('png')) ext = 'png';
+    else if (contentType.includes('gif')) ext = 'gif';
+    else if (imageUrl.includes('.jpg') || imageUrl.includes('.jpeg')) ext = 'jpg';
+    else if (imageUrl.includes('.png')) ext = 'png';
+
+    const filename = customFilename || generateUniqueFilename('artwork', ext);
+    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const filePath = path.join(targetDir, filename);
+
+    fs.writeFileSync(filePath, Buffer.from(response.data));
+    console.log(`Image saved to persistent storage: ${filePath}`);
+
+    // Return the URL path for accessing the image
+    return {
+      filename,
+      path: filePath,
+      url: `/uploads/${category}/${filename}`,
+      size: response.data.byteLength
+    };
+  } catch (error) {
+    console.error('Failed to save image:', error.message);
+    throw error;
+  }
+};
+
+// Save base64 image to persistent storage
+const saveImageFromBase64 = (base64Data, category = 'customer', customFilename = null) => {
+  try {
+    // Remove data URL prefix if present
+    let imageData = base64Data;
+    let ext = 'png';
+
+    if (base64Data.startsWith('data:')) {
+      const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (matches) {
+        ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+        imageData = matches[2];
+      }
+    }
+
+    const buffer = Buffer.from(imageData, 'base64');
+    const filename = customFilename || generateUniqueFilename('upload', ext);
+    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const filePath = path.join(targetDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+    console.log(`Base64 image saved to persistent storage: ${filePath}`);
+
+    return {
+      filename,
+      path: filePath,
+      url: `/uploads/${category}/${filename}`,
+      size: buffer.length
+    };
+  } catch (error) {
+    console.error('Failed to save base64 image:', error.message);
+    throw error;
+  }
 };
 
 // Main generate endpoint
@@ -205,8 +304,20 @@ app.post('/api/generate', async (req, res) => {
 
       console.log('Image URL received:', imageUrl);
 
+      // Save generated image to persistent storage
+      let savedImage = null;
+      try {
+        savedImage = await saveImageFromUrl(imageUrl, 'generated');
+        console.log(`Image saved to persistent storage: ${savedImage.url}`);
+      } catch (saveError) {
+        console.warn('Failed to save image to persistent storage:', saveError.message);
+        // Continue without saving - image is still available via external URL
+      }
+
       const result = {
         imageUrl: imageUrl,
+        localUrl: savedImage?.url || null,
+        savedImage: savedImage,
         prompt: prompt.trim(),
         timestamp: new Date().toISOString(),
         model: 'openai-image-1.5',
@@ -344,6 +455,162 @@ app.post('/api/download-with-dpi', async (req, res) => {
   }
 });
 
+// ========================================
+// Persistent Storage API Endpoints
+// ========================================
+
+// List all images in persistent storage
+app.get('/api/images', (req, res) => {
+  try {
+    const { category } = req.query;
+    const categories = category ? [category] : ['generated', 'customer'];
+    const images = [];
+
+    categories.forEach(cat => {
+      const dir = cat === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        files.forEach(filename => {
+          const filePath = path.join(dir, filename);
+          const stats = fs.statSync(filePath);
+          if (stats.isFile()) {
+            images.push({
+              filename,
+              category: cat,
+              url: `/uploads/${cat}/${filename}`,
+              size: stats.size,
+              createdAt: stats.birthtime,
+              modifiedAt: stats.mtime
+            });
+          }
+        });
+      }
+    });
+
+    // Sort by creation date, newest first
+    images.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    res.json({
+      success: true,
+      count: images.length,
+      images,
+      storage: {
+        uploadsDir: UPLOADS_DIR,
+        generatedDir: GENERATED_DIR,
+        customerDir: CUSTOMER_DIR
+      }
+    });
+  } catch (error) {
+    console.error('Failed to list images:', error.message);
+    res.status(500).json({ error: 'Failed to list images', details: error.message });
+  }
+});
+
+// Upload an image to persistent storage
+app.post('/api/images/upload', (req, res) => {
+  try {
+    const { image, category = 'customer', filename } = req.body;
+
+    if (!image) {
+      return res.status(400).json({ error: 'Image data required (base64)' });
+    }
+
+    const savedImage = saveImageFromBase64(image, category, filename);
+    res.json({
+      success: true,
+      message: 'Image uploaded to persistent storage',
+      ...savedImage
+    });
+  } catch (error) {
+    console.error('Failed to upload image:', error.message);
+    res.status(500).json({ error: 'Failed to upload image', details: error.message });
+  }
+});
+
+// Delete an image from persistent storage
+app.delete('/api/images/:category/:filename', (req, res) => {
+  try {
+    const { category, filename } = req.params;
+    const targetDir = category === 'customer' ? CUSTOMER_DIR : GENERATED_DIR;
+    const filePath = path.join(targetDir, filename);
+
+    // Security check - prevent directory traversal
+    if (!filePath.startsWith(targetDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    fs.unlinkSync(filePath);
+    console.log(`Image deleted: ${filePath}`);
+
+    res.json({
+      success: true,
+      message: 'Image deleted from persistent storage',
+      filename,
+      category
+    });
+  } catch (error) {
+    console.error('Failed to delete image:', error.message);
+    res.status(500).json({ error: 'Failed to delete image', details: error.message });
+  }
+});
+
+// Get storage statistics
+app.get('/api/storage/stats', (req, res) => {
+  try {
+    const getDirectoryStats = (dir) => {
+      if (!fs.existsSync(dir)) {
+        return { count: 0, totalSize: 0 };
+      }
+      const files = fs.readdirSync(dir);
+      let totalSize = 0;
+      let count = 0;
+
+      files.forEach(filename => {
+        const filePath = path.join(dir, filename);
+        const stats = fs.statSync(filePath);
+        if (stats.isFile()) {
+          totalSize += stats.size;
+          count++;
+        }
+      });
+
+      return { count, totalSize };
+    };
+
+    const generatedStats = getDirectoryStats(GENERATED_DIR);
+    const customerStats = getDirectoryStats(CUSTOMER_DIR);
+
+    res.json({
+      success: true,
+      storage: {
+        uploadsDir: UPLOADS_DIR,
+        generated: {
+          directory: GENERATED_DIR,
+          ...generatedStats,
+          totalSizeMB: (generatedStats.totalSize / (1024 * 1024)).toFixed(2)
+        },
+        customer: {
+          directory: CUSTOMER_DIR,
+          ...customerStats,
+          totalSizeMB: (customerStats.totalSize / (1024 * 1024)).toFixed(2)
+        },
+        total: {
+          count: generatedStats.count + customerStats.count,
+          totalSize: generatedStats.totalSize + customerStats.totalSize,
+          totalSizeMB: ((generatedStats.totalSize + customerStats.totalSize) / (1024 * 1024)).toFixed(2)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get storage stats:', error.message);
+    res.status(500).json({ error: 'Failed to get storage stats', details: error.message });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -352,7 +619,12 @@ app.get('/api/health', (req, res) => {
     version: '1.0.0',
     features: {
       models: ['openai-image-1.5'],
-      dpiProcessing: true
+      dpiProcessing: true,
+      persistentStorage: true
+    },
+    storage: {
+      uploadsDir: UPLOADS_DIR,
+      writable: fs.existsSync(UPLOADS_DIR) && fs.accessSync(UPLOADS_DIR, fs.constants.W_OK) === undefined
     }
   });
 });
@@ -367,4 +639,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log(`Replicate API: ${process.env.REPLICATE_API_TOKEN ? 'Configured' : 'Missing'}`);
   console.log('Supported model: OpenAI Image 1.5');
+  console.log(`Persistent storage: ${UPLOADS_DIR}`);
+  console.log(`  - Generated images: ${GENERATED_DIR}`);
+  console.log(`  - Customer uploads: ${CUSTOMER_DIR}`);
 });
