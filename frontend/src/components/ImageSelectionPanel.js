@@ -1,57 +1,60 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image, Check, ChevronLeft, ChevronRight, X, Maximize2, Upload, Trash2, RefreshCw } from 'lucide-react';
+import { Image, Check, X, Maximize2, Upload, Trash2, RefreshCw, Plus } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import toast from 'react-hot-toast';
 import { RENAISSANCE_CATEGORIES, getImagesByCategory } from '../data/renaissanceImages';
 
-// Add uploaded category
-const UPLOADED_CATEGORY = {
-  id: 'uploaded',
-  name: 'Uploaded',
-  description: 'Your uploaded base images',
-  icon: '📤'
-};
-
-const ALL_CATEGORIES = [...RENAISSANCE_CATEGORIES, UPLOADED_CATEGORY];
+const ALL_CATEGORIES = RENAISSANCE_CATEGORIES;
 
 export default function ImageSelectionPanel({ selectedImage, onSelectImage, onClear }) {
   const [activeCategory, setActiveCategory] = useState(RENAISSANCE_CATEGORIES[0].id);
   const [previewImage, setPreviewImage] = useState(null);
   const [imageErrors, setImageErrors] = useState({});
-  const [uploadedImages, setUploadedImages] = useState([]);
-  const [loadingUploaded, setLoadingUploaded] = useState(false);
+  const [uploadedImagesByCategory, setUploadedImagesByCategory] = useState({});
+  const [loadingCategory, setLoadingCategory] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [showUploadZone, setShowUploadZone] = useState(false);
 
-  // Fetch uploaded base images
-  const fetchUploadedImages = useCallback(async () => {
-    setLoadingUploaded(true);
+  // Fetch uploaded images for a specific category
+  const fetchUploadedImages = useCallback(async (categoryId) => {
+    setLoadingCategory(categoryId);
     try {
-      const response = await fetch('/api/images?category=base');
+      const response = await fetch(`/api/images?category=${categoryId}`);
       const data = await response.json();
       if (data.success && data.images) {
         // Convert to the same format as renaissance images
-        const formattedImages = data.images.map((img, index) => ({
-          id: `uploaded-${img.filename}`,
-          category: 'uploaded',
+        const formattedImages = data.images.map((img) => ({
+          id: `uploaded-${categoryId}-${img.filename}`,
+          category: categoryId,
           name: img.filename.replace(/\.[^/.]+$/, '').replace(/-/g, ' '),
           url: img.url,
           thumbnail: img.url,
           filename: img.filename,
           isUploaded: true
         }));
-        setUploadedImages(formattedImages);
+        setUploadedImagesByCategory(prev => ({
+          ...prev,
+          [categoryId]: formattedImages
+        }));
       }
     } catch (error) {
-      console.error('Failed to fetch uploaded images:', error);
+      console.error(`Failed to fetch uploaded images for ${categoryId}:`, error);
     } finally {
-      setLoadingUploaded(false);
+      setLoadingCategory(null);
     }
   }, []);
 
-  useEffect(() => {
-    fetchUploadedImages();
+  // Fetch all category uploads on mount
+  const fetchAllCategoryUploads = useCallback(async () => {
+    for (const category of RENAISSANCE_CATEGORIES) {
+      await fetchUploadedImages(category.id);
+    }
   }, [fetchUploadedImages]);
+
+  useEffect(() => {
+    fetchAllCategoryUploads();
+  }, [fetchAllCategoryUploads]);
 
   // Convert file to base64
   const fileToBase64 = (file) => {
@@ -63,12 +66,13 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
     });
   };
 
-  // Handle file drop for uploading
+  // Handle file drop for uploading to current category
   const onDrop = useCallback(async (acceptedFiles) => {
     if (acceptedFiles.length === 0) return;
 
     setUploading(true);
     let successCount = 0;
+    const targetCategory = activeCategory;
 
     for (const file of acceptedFiles) {
       try {
@@ -78,7 +82,7 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image: base64,
-            category: 'base',
+            category: targetCategory,
             filename: file.name.replace(/[^a-zA-Z0-9.-]/g, '-')
           })
         });
@@ -92,18 +96,19 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
     }
 
     if (successCount > 0) {
-      toast.success(`Uploaded ${successCount} image(s)`);
-      fetchUploadedImages();
+      toast.success(`Uploaded ${successCount} image(s) to ${ALL_CATEGORIES.find(c => c.id === targetCategory)?.name}`);
+      fetchUploadedImages(targetCategory);
+      setShowUploadZone(false);
     }
 
     setUploading(false);
-  }, [fetchUploadedImages]);
+  }, [activeCategory, fetchUploadedImages]);
 
   // Delete uploaded image
   const deleteUploadedImage = async (image, e) => {
     e.stopPropagation();
     try {
-      const response = await fetch(`/api/images/base/${image.filename}`, {
+      const response = await fetch(`/api/images/${image.category}/${image.filename}`, {
         method: 'DELETE'
       });
       const data = await response.json();
@@ -112,7 +117,7 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
         if (selectedImage?.id === image.id) {
           onClear();
         }
-        fetchUploadedImages();
+        fetchUploadedImages(image.category);
       }
     } catch (error) {
       console.error('Failed to delete image:', error);
@@ -128,8 +133,12 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
     noKeyboard: false
   });
 
-  const currentImages = activeCategory === 'uploaded' ? uploadedImages : getImagesByCategory(activeCategory);
+  // Combine static images with uploaded images for the current category
+  const staticImages = getImagesByCategory(activeCategory);
+  const uploadedForCategory = uploadedImagesByCategory[activeCategory] || [];
+  const currentImages = [...uploadedForCategory, ...staticImages];
   const currentCategory = ALL_CATEGORIES.find(c => c.id === activeCategory);
+  const uploadedCount = uploadedForCategory.length;
 
   const handleImageError = (imageId) => {
     setImageErrors(prev => ({ ...prev, [imageId]: true }));
@@ -147,31 +156,48 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
     <div className="space-y-4">
       {/* Category Tabs */}
       <div className="flex flex-wrap gap-2">
-        {ALL_CATEGORIES.map((category) => (
-          <button
-            key={category.id}
-            onClick={() => setActiveCategory(category.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              activeCategory === category.id
-                ? category.id === 'uploaded'
-                  ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-md'
-                  : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
-                : 'bg-white/70 text-slate-600 hover:bg-white hover:shadow-sm border border-slate-200'
-            }`}
-          >
-            <span>{category.icon}</span>
-            <span>{category.name}</span>
-            {category.id === 'uploaded' && uploadedImages.length > 0 && (
-              <span className="bg-white/30 px-1.5 py-0.5 rounded-full text-xs">
-                {uploadedImages.length}
-              </span>
-            )}
-          </button>
-        ))}
+        {ALL_CATEGORIES.map((category) => {
+          const categoryUploadCount = uploadedImagesByCategory[category.id]?.length || 0;
+          return (
+            <button
+              key={category.id}
+              onClick={() => {
+                setActiveCategory(category.id);
+                setShowUploadZone(false);
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
+                activeCategory === category.id
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                  : 'bg-white/70 text-slate-600 hover:bg-white hover:shadow-sm border border-slate-200'
+              }`}
+            >
+              <span>{category.icon}</span>
+              <span>{category.name}</span>
+              {categoryUploadCount > 0 && (
+                <span className="bg-white/30 px-1.5 py-0.5 rounded-full text-xs">
+                  {categoryUploadCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Category Description */}
-      <p className="text-sm text-slate-500">{currentCategory?.description}</p>
+      {/* Category Description with Upload Button */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">{currentCategory?.description}</p>
+        <button
+          onClick={() => setShowUploadZone(!showUploadZone)}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+            showUploadZone
+              ? 'bg-amber-100 text-amber-700 border border-amber-300'
+              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+          }`}
+        >
+          <Plus className={`w-4 h-4 transition-transform ${showUploadZone ? 'rotate-45' : ''}`} />
+          Add Images
+        </button>
+      </div>
 
       {/* Selected Image Preview */}
       {selectedImage && (
@@ -219,36 +245,45 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
         </motion.div>
       )}
 
-      {/* Upload Zone for Uploaded Category */}
-      {activeCategory === 'uploaded' && (
-        <div
-          {...getRootProps()}
-          className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-            isDragActive
-              ? 'border-purple-400 bg-purple-50'
-              : 'border-slate-300 hover:border-purple-400 hover:bg-slate-50'
-          } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
-        >
-          <input {...getInputProps()} />
-          {uploading ? (
-            <div className="flex flex-col items-center">
-              <RefreshCw className="w-8 h-8 text-purple-400 animate-spin mb-2" />
-              <p className="text-sm text-purple-700 font-medium">Uploading...</p>
+      {/* Upload Zone for Current Category */}
+      <AnimatePresence>
+        {showUploadZone && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div
+              {...getRootProps()}
+              className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                isDragActive
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-slate-300 hover:border-amber-400 hover:bg-slate-50'
+              } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              <input {...getInputProps()} />
+              {uploading ? (
+                <div className="flex flex-col items-center">
+                  <RefreshCw className="w-8 h-8 text-amber-400 animate-spin mb-2" />
+                  <p className="text-sm text-amber-700 font-medium">Uploading to {currentCategory?.name}...</p>
+                </div>
+              ) : (
+                <>
+                  <Upload className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+                  <p className="text-sm text-amber-700 font-medium">
+                    {isDragActive ? 'Drop images here...' : `Drag & drop images to add to ${currentCategory?.name}`}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">JPG, PNG, GIF, WebP</p>
+                </>
+              )}
             </div>
-          ) : (
-            <>
-              <Upload className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-              <p className="text-sm text-purple-700 font-medium">
-                {isDragActive ? 'Drop images here...' : 'Drag & drop base images or click to upload'}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">JPG, PNG, GIF, WebP</p>
-            </>
-          )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Image Grid */}
-      {activeCategory === 'uploaded' && loadingUploaded ? (
+      {loadingCategory === activeCategory ? (
         <div className="flex justify-center py-8">
           <RefreshCw className="w-8 h-8 text-slate-400 animate-spin" />
         </div>
@@ -314,15 +349,11 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
             ))}
           </AnimatePresence>
         </div>
-      ) : activeCategory === 'uploaded' ? (
+      ) : (
         <div className="text-center py-8 text-slate-500">
           <Image className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-          <p className="text-sm">No uploaded images yet</p>
-          <p className="text-xs text-slate-400 mt-1">Upload some images above to use as style references</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2">
-          {/* Empty state for other categories */}
+          <p className="text-sm">No images in {currentCategory?.name} yet</p>
+          <p className="text-xs text-slate-400 mt-1">Click "Add Images" to upload images to this category</p>
         </div>
       )}
 
@@ -330,6 +361,9 @@ export default function ImageSelectionPanel({ selectedImage, onSelectImage, onCl
       {currentImages.length > 0 && (
         <div className="text-center text-sm text-slate-500">
           Showing {currentImages.length} images in {currentCategory?.name}
+          {uploadedCount > 0 && (
+            <span className="text-amber-600"> ({uploadedCount} uploaded)</span>
+          )}
         </div>
       )}
 
